@@ -1,0 +1,1896 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Docker, Under the Hood — A Working Notebook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #EEF1F5;
+    --surface:   #FFFFFF;
+    --surface-2: #F8FAFC;
+    --ink:       #0B1220;
+    --ink-soft:  #1E293B;
+    --ink-mute:  #475569;
+    --ink-faint: #94A3B8;
+    --rule:      #E2E8F0;
+    --rule-soft: #EDF2F7;
+    --teal:      #0F766E;
+    --teal-bg:   #CCFBF1;
+    --amber:     #B45309;
+    --amber-bg:  #FEF3C7;
+    --crimson:   #BE123C;
+    --crimson-bg:#FFE4E6;
+    --indigo:    #3730A3;
+    --indigo-bg: #E0E7FF;
+    --code-bg:   #0B1220;
+    --code-ink:  #E2E8F0;
+    --code-key:  #93C5FD;
+    --code-str:  #FCD34D;
+    --code-cmt:  #64748B;
+    --code-fn:   #FBBF24;
+    --code-num:  #F472B6;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 16px;
+    line-height: 1.65;
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 64px 32px 120px;
+  }
+
+  /* ========== HERO ========== */
+  .top-strip {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 24px;
+    margin-bottom: 48px;
+    border-bottom: 1px solid var(--rule);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--ink-mute);
+    text-transform: uppercase;
+  }
+  .top-strip .badge {
+    background: var(--ink);
+    color: white;
+    padding: 4px 10px;
+    border-radius: 2px;
+    letter-spacing: 0.14em;
+  }
+
+  h1 {
+    font-family: 'Inter', sans-serif;
+    font-weight: 900;
+    font-size: clamp(40px, 6.5vw, 72px);
+    line-height: 0.98;
+    letter-spacing: -0.035em;
+    color: var(--ink);
+    margin: 0 0 24px;
+  }
+  h1 .accent {
+    color: var(--teal);
+    font-style: normal;
+  }
+  .lede {
+    font-size: 20px;
+    line-height: 1.5;
+    color: var(--ink-soft);
+    max-width: 680px;
+    margin: 0 0 40px;
+    font-weight: 400;
+  }
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin-bottom: 64px;
+  }
+  .stat {
+    background: var(--surface);
+    padding: 20px;
+  }
+  .stat .label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--ink-mute);
+    margin-bottom: 6px;
+  }
+  .stat .value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  /* ========== TOC ========== */
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 32px;
+    margin-bottom: 80px;
+  }
+  .toc h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--ink-mute);
+    margin: 0 0 20px;
+    font-weight: 600;
+  }
+  .toc ol {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    columns: 2;
+    column-gap: 40px;
+  }
+  .toc li {
+    padding: 5px 0;
+    break-inside: avoid;
+  }
+  .toc a {
+    color: var(--ink);
+    text-decoration: none;
+    font-size: 14.5px;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    transition: color .15s;
+  }
+  .toc a:hover { color: var(--teal); }
+  .toc a::before {
+    content: attr(data-n);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-faint);
+    font-weight: 600;
+    min-width: 24px;
+  }
+
+  /* ========== SECTIONS ========== */
+  section {
+    margin: 96px 0 0;
+    scroll-margin-top: 24px;
+  }
+  .sec-head {
+    margin-bottom: 32px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid var(--ink);
+  }
+  .sec-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    color: var(--teal);
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 6px;
+  }
+  h2 {
+    font-family: 'Inter', sans-serif;
+    font-weight: 800;
+    font-size: 36px;
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+    color: var(--ink);
+    margin: 0;
+  }
+  h3 {
+    font-family: 'Inter', sans-serif;
+    font-weight: 700;
+    font-size: 22px;
+    color: var(--ink);
+    margin: 40px 0 14px;
+    letter-spacing: -0.012em;
+  }
+  h4 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--teal);
+    margin: 28px 0 10px;
+  }
+
+  p { margin: 0 0 16px; }
+  p strong { color: var(--ink); font-weight: 700; }
+  a { color: var(--teal); }
+
+  /* ========== ANALOGY ========== */
+  .mental-model {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 4px solid var(--teal);
+    padding: 24px 28px;
+    margin: 24px 0;
+  }
+  .mental-model::before {
+    content: "Mental model";
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--teal);
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+  .mental-model p:last-child { margin-bottom: 0; }
+
+  /* ========== KEY CONCEPT ========== */
+  .key {
+    background: var(--indigo-bg);
+    border-left: 4px solid var(--indigo);
+    padding: 18px 24px;
+    margin: 24px 0;
+  }
+  .key::before {
+    content: "Key insight";
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--indigo);
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .key p { margin: 0; color: var(--ink-soft); }
+  .key p strong { color: var(--indigo); }
+
+  /* ========== GOTCHA ========== */
+  .gotcha {
+    background: var(--amber-bg);
+    border-left: 4px solid var(--amber);
+    padding: 18px 24px;
+    margin: 24px 0;
+  }
+  .gotcha::before {
+    content: "Gotcha";
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--amber);
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .gotcha p { margin: 0; color: var(--ink-soft); }
+  .gotcha p strong { color: var(--amber); }
+
+  /* ========== MYTH BUSTER ========== */
+  .myth {
+    background: var(--crimson-bg);
+    border-left: 4px solid var(--crimson);
+    padding: 18px 24px;
+    margin: 24px 0;
+  }
+  .myth::before {
+    content: "Common misconception";
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--crimson);
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .myth p { margin: 0; color: var(--ink-soft); }
+  .myth p strong { color: var(--crimson); }
+
+  /* ========== CODE ========== */
+  code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.86em;
+    background: var(--surface-2);
+    padding: 2px 7px;
+    border-radius: 3px;
+    color: var(--ink);
+    border: 1px solid var(--rule);
+    font-weight: 500;
+  }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    padding: 22px 24px;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin: 20px 0;
+    position: relative;
+  }
+  pre[data-label]::before {
+    content: attr(data-label);
+    position: absolute;
+    top: 0;
+    right: 0;
+    background: rgba(255,255,255,0.06);
+    color: var(--code-cmt);
+    font-size: 10px;
+    padding: 4px 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    border-bottom-left-radius: 4px;
+    border-left: 1px solid rgba(255,255,255,0.08);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+  pre code {
+    background: none;
+    border: none;
+    color: inherit;
+    padding: 0;
+    font-size: inherit;
+    font-weight: 400;
+  }
+  .tok-cmt { color: var(--code-cmt); font-style: italic; }
+  .tok-key { color: var(--code-key); font-weight: 500; }
+  .tok-str { color: var(--code-str); }
+  .tok-fn  { color: var(--code-fn); }
+  .tok-num { color: var(--code-num); }
+
+  /* ========== DIAGRAM ========== */
+  .diagram {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 24px;
+    margin: 24px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--ink-soft);
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  /* ========== TABLES ========== */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 24px 0;
+    font-size: 14.5px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+  }
+  th, td {
+    text-align: left;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  th {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--ink-mute);
+    font-weight: 700;
+    background: var(--surface-2);
+    border-bottom: 2px solid var(--ink);
+  }
+  td:first-child { font-weight: 600; color: var(--ink); white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+
+  /* ========== LISTS ========== */
+  ul, ol { padding-left: 24px; margin: 12px 0 18px; }
+  li { margin-bottom: 8px; }
+  ul li::marker { color: var(--teal); }
+  ol li::marker { color: var(--teal); font-weight: 700; }
+
+  /* ========== GRID CARDS ========== */
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin: 24px 0;
+  }
+  .grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin: 24px 0;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 20px;
+  }
+  .card h4 { margin-top: 0; }
+  .card .tag {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    margin-bottom: 8px;
+    background: var(--surface-2);
+    color: var(--ink-mute);
+    border: 1px solid var(--rule);
+  }
+
+  /* ========== NAMESPACE TABLE ========== */
+  .ns-row {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: 24px;
+    padding: 20px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .ns-row:last-child { border-bottom: none; }
+  .ns-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    color: var(--teal);
+    font-size: 14px;
+  }
+  .ns-name small {
+    display: block;
+    color: var(--ink-mute);
+    font-size: 11px;
+    font-weight: 500;
+    margin-top: 4px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  /* ========== STEP ========== */
+  .step {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 24px;
+    margin: 16px 0;
+    position: relative;
+  }
+  .step-n {
+    position: absolute;
+    top: -1px;
+    left: -1px;
+    background: var(--ink);
+    color: white;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 12px;
+    letter-spacing: 0.12em;
+  }
+  .step h4 { margin-top: 16px; }
+
+  /* ========== FOOTER ========== */
+  footer {
+    margin-top: 120px;
+    padding-top: 40px;
+    border-top: 1px solid var(--rule);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink-mute);
+    letter-spacing: 0.04em;
+  }
+
+  /* ========== RESPONSIVE ========== */
+  @media (max-width: 720px) {
+    .wrap { padding: 40px 20px 80px; }
+    h1 { font-size: 42px; }
+    h2 { font-size: 28px; }
+    .lede { font-size: 17px; }
+    .toc ol { columns: 1; }
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    .ns-row { grid-template-columns: 1fr; gap: 8px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <!-- ============== HERO ============== -->
+  <div class="top-strip">
+    <span class="badge">Engineering Notes</span>
+    <span>Systems &middot; Linux internals &middot; Python</span>
+  </div>
+
+  <h1>Docker, <span class="accent">under the hood.</span></h1>
+  <p class="lede">
+    Docker is not magic. It is a careful arrangement of three Linux kernel features
+    you already have on your laptop — namespaces, cgroups, and union filesystems —
+    stitched together by a small set of programs. This notebook takes the lid off:
+    we look at every piece, and at the end we write our own miniature Docker in
+    Python that you can actually run.
+  </p>
+
+  <div class="stat-grid">
+    <div class="stat">
+      <div class="label">Subject</div>
+      <div class="value">Container internals</div>
+    </div>
+    <div class="stat">
+      <div class="label">Depth</div>
+      <div class="value">Fresher → systems-level</div>
+    </div>
+    <div class="stat">
+      <div class="label">Read time</div>
+      <div class="value">~45 min</div>
+    </div>
+    <div class="stat">
+      <div class="label">Has code</div>
+      <div class="value">Yes, runnable</div>
+    </div>
+  </div>
+
+  <!-- ============== TOC ============== -->
+  <nav class="toc">
+    <h3>Contents</h3>
+    <ol>
+      <li><a href="#s1"  data-n="01">The problem Docker solves</a></li>
+      <li><a href="#s2"  data-n="02">Containers vs Virtual Machines</a></li>
+      <li><a href="#s3"  data-n="03">A container is just a process</a></li>
+      <li><a href="#s4"  data-n="04">Namespaces — the isolation trick</a></li>
+      <li><a href="#s5"  data-n="05">cgroups — the resource limits</a></li>
+      <li><a href="#s6"  data-n="06">Union filesystems and image layers</a></li>
+      <li><a href="#s7"  data-n="07">What a Docker image actually is</a></li>
+      <li><a href="#s8"  data-n="08">Docker's architecture</a></li>
+      <li><a href="#s9"  data-n="09">What happens when you run docker run</a></li>
+      <li><a href="#s10" data-n="10">Container networking, step by step</a></li>
+      <li><a href="#s11" data-n="11">Storage — volumes and bind mounts</a></li>
+      <li><a href="#s12" data-n="12">Dockerfile — how layers are built</a></li>
+      <li><a href="#s13" data-n="13">Build your own Docker in Python</a></li>
+      <li><a href="#s14" data-n="14">Common misconceptions</a></li>
+      <li><a href="#s15" data-n="15">Interview cheat sheet</a></li>
+    </ol>
+  </nav>
+
+  <!-- ============== 01 ============== -->
+  <section id="s1">
+    <div class="sec-head">
+      <span class="sec-num">Section 01</span>
+      <h2>The problem Docker solves</h2>
+    </div>
+
+    <p>
+      You write a Python app that works perfectly on your laptop. You send the code to a
+      colleague — it fails. You deploy it to a staging server — it fails differently.
+      You finally ship it, and on the production server it fails in a brand new way.
+    </p>
+
+    <p>The reasons are always some flavor of:</p>
+    <ul>
+      <li><strong>Different OS</strong> — you developed on macOS, server runs Ubuntu, colleague is on Windows.</li>
+      <li><strong>Different language version</strong> — you have Python 3.11, server has 3.8.</li>
+      <li><strong>Different system libraries</strong> — your machine has OpenSSL 3, server has OpenSSL 1.1.</li>
+      <li><strong>Missing dependencies</strong> — your app needs <code>ffmpeg</code>, the server does not have it.</li>
+      <li><strong>Different config</strong> — environment variables, file paths, ports.</li>
+    </ul>
+
+    <p>
+      For decades the answer was: write detailed setup docs, hope the deployer follows them,
+      and debug when they do not. Then came Virtual Machines, which solved the problem by
+      shipping a whole computer inside a file. Worked, but slow, fat, and resource-hungry.
+    </p>
+
+    <p>
+      Docker's promise is simple: <strong>package the application plus everything it depends
+      on into one portable, self-contained unit called a container, and run that unit anywhere
+      Docker is installed</strong>. The container behaves identically on your laptop, your
+      colleague's machine, the CI server, and production.
+    </p>
+
+    <div class="mental-model">
+      <p>
+        Picture a shipping container. Before they existed, dock workers loaded ships one barrel,
+        sack, and crate at a time — slow, error-prone, expensive. Standard-sized shipping
+        containers changed everything: it does not matter what is inside, every port, ship,
+        crane, and truck knows how to handle a container.
+      </p>
+      <p>
+        Docker did the same for software. Your app, its language runtime, its libraries, its
+        config — all sealed inside a standard container that any Docker host knows how to run.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============== 02 ============== -->
+  <section id="s2">
+    <div class="sec-head">
+      <span class="sec-num">Section 02</span>
+      <h2>Containers vs Virtual Machines</h2>
+    </div>
+
+    <p>
+      This is the most important comparison to internalize, because the visual most beginners
+      have in their head is wrong.
+    </p>
+
+    <h3>A Virtual Machine</h3>
+    <p>
+      A hypervisor (VMware, VirtualBox, KVM, Hyper-V) runs on your host hardware. It carves
+      out virtual hardware — fake CPUs, fake disks, fake network cards. On top of each piece
+      of fake hardware, you install a full guest operating system, kernel and all. That guest
+      OS then runs your app.
+    </p>
+
+    <div class="diagram">
+   ┌────────────────────────────────────────────────┐
+   │  Your App A     │  Your App B     │  App C     │
+   ├─────────────────┼─────────────────┼────────────┤
+   │  Libs & deps    │  Libs & deps    │  Libs      │
+   ├─────────────────┼─────────────────┼────────────┤
+   │  Guest OS       │  Guest OS       │  Guest OS  │   ← each VM has its own kernel
+   │  (Ubuntu)       │  (CentOS)       │  (Alpine)  │     and OS
+   ├─────────────────┴─────────────────┴────────────┤
+   │  Hypervisor (VMware / KVM / VirtualBox)        │
+   ├────────────────────────────────────────────────┤
+   │  Host Operating System                         │
+   ├────────────────────────────────────────────────┤
+   │  Physical Hardware                             │
+   └────────────────────────────────────────────────┘</div>
+
+    <h3>A Container</h3>
+    <p>
+      A container does <em>not</em> include a kernel or a full OS. It is a normal Linux process
+      running directly on the host kernel, but the kernel has been told to give that process
+      a private view of the system — its own filesystem, its own process list, its own network,
+      its own hostname. Multiple containers share the same kernel.
+    </p>
+
+    <div class="diagram">
+   ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+   │  App A       │ │  App B       │ │  App C       │
+   ├──────────────┤ ├──────────────┤ ├──────────────┤
+   │  Libs & deps │ │  Libs & deps │ │  Libs & deps │
+   │  (Ubuntu     │ │  (CentOS     │ │  (Alpine     │
+   │   userspace) │ │   userspace) │ │   userspace) │
+   └──────┬───────┘ └──────┬───────┘ └──────┬───────┘
+          └────────────────┼────────────────┘
+                           ▼
+   ┌────────────────────────────────────────────────┐
+   │  Docker Engine                                 │
+   ├────────────────────────────────────────────────┤
+   │  Host Operating System (one shared Linux       │
+   │  kernel for all containers)                    │
+   ├────────────────────────────────────────────────┤
+   │  Physical Hardware                             │
+   └────────────────────────────────────────────────┘</div>
+
+    <div class="key">
+      <p>
+        <strong>The single line that explains everything.</strong> A VM virtualizes the
+        <em>hardware</em>, so every guest needs its own OS. A container virtualizes the
+        <em>operating system</em>, so every container shares the host's kernel.
+      </p>
+    </div>
+
+    <h3>Concrete numbers</h3>
+    <table>
+      <thead>
+        <tr><th>Property</th><th>Virtual Machine</th><th>Container</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Boot time</td><td>30 sec to a few minutes</td><td>Tens of milliseconds</td></tr>
+        <tr><td>Size on disk</td><td>1 GB to 20+ GB per VM</td><td>5 MB to ~500 MB per image</td></tr>
+        <tr><td>RAM overhead</td><td>Hundreds of MB per VM</td><td>A few MB per container</td></tr>
+        <tr><td>Density</td><td>Tens of VMs per host</td><td>Hundreds or thousands of containers per host</td></tr>
+        <tr><td>OS choice</td><td>Any OS as guest</td><td>Linux containers need a Linux host kernel</td></tr>
+        <tr><td>Isolation strength</td><td>Very strong (hardware-level)</td><td>Strong but kernel-shared (weaker boundary)</td></tr>
+      </tbody>
+    </table>
+
+    <div class="gotcha">
+      <p>
+        <strong>Docker on macOS or Windows.</strong> Both operating systems lack the Linux
+        kernel features Docker needs (namespaces, cgroups, OverlayFS). To make Docker work,
+        Docker Desktop quietly runs a tiny Linux VM in the background and runs your "Docker"
+        containers <em>inside</em> that VM. On Linux, no VM — containers run directly on the
+        host.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============== 03 ============== -->
+  <section id="s3">
+    <div class="sec-head">
+      <span class="sec-num">Section 03</span>
+      <h2>A container is just a process</h2>
+    </div>
+
+    <p>
+      This is the mental model shift everything else depends on. When you run
+      <code>docker run nginx</code>, you do not get a "container" object materializing on your
+      machine. You get a normal Linux process — the <code>nginx</code> binary — running on your
+      kernel, that the kernel has been told to deceive in specific ways.
+    </p>
+
+    <p>Run this experiment on any Linux machine with Docker:</p>
+
+    <pre data-label="terminal"><code><span class="tok-cmt"># Start a container in the background</span>
+$ docker run -d --name web nginx
+
+<span class="tok-cmt"># Find its process on the host</span>
+$ ps -ef | grep nginx
+root     14523  14502  0 10:32 ?    00:00:00 nginx: master process nginx
+nginx    14580  14523  0 10:32 ?    00:00:00 nginx: worker process
+
+<span class="tok-cmt"># Note: these are real PIDs on YOUR host's process table.</span>
+<span class="tok-cmt"># The "container" is just these processes with special metadata.</span></code></pre>
+
+    <p>
+      The nginx process has a PID on the host (e.g. 14523). It uses the host's CPU and memory.
+      But <em>from inside the container</em>, if you exec into it and run <code>ps</code>, it
+      sees something completely different:
+    </p>
+
+    <pre data-label="inside the container"><code>$ docker exec web ps -ef
+UID        PID  PPID  C STIME TTY    TIME CMD
+root         1     0  0 10:32 ?      00:00:00 nginx: master process
+nginx       29     1  0 10:32 ?      00:00:00 nginx: worker process</code></pre>
+
+    <p>
+      Inside the container, nginx thinks it is PID 1. It cannot see any other processes on
+      the host. It cannot see your terminal, your editor, your other containers. The kernel
+      is lying to it on purpose — and that lie is called a <strong>namespace</strong>.
+    </p>
+
+    <div class="key">
+      <p>
+        A container is a normal Linux process that the kernel shows a custom view of the
+        system to. The "container" exists only in the way the kernel describes the world to
+        that process. Strip away the namespaces and cgroups, and you would just have nginx
+        running on your machine.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============== 04 ============== -->
+  <section id="s4">
+    <div class="sec-head">
+      <span class="sec-num">Section 04</span>
+      <h2>Namespaces — the isolation trick</h2>
+    </div>
+
+    <p>
+      A <strong>Linux namespace</strong> is a kernel feature that wraps a global system
+      resource and presents the process inside it with its own isolated instance of that
+      resource. There are seven namespaces, and Docker uses all of them.
+    </p>
+
+    <p>
+      The system call that creates them is <code>unshare()</code> for an existing process or
+      <code>clone()</code> when forking a new one. Either way, the kernel allocates fresh,
+      empty versions of the requested resources.
+    </p>
+
+    <div class="ns-row">
+      <div class="ns-name">PID<small>processes</small></div>
+      <div>
+        Each container has its own process ID space. The first process inside the container
+        sees itself as PID 1. It cannot see any process outside the container, cannot send
+        signals to them, cannot inspect them via <code>/proc</code>. From the host's point of
+        view, the same process has a different, larger PID.
+      </div>
+    </div>
+
+    <div class="ns-row">
+      <div class="ns-name">MNT<small>mount points</small></div>
+      <div>
+        Each container has its own view of the filesystem mount table. Mounts done inside the
+        container do not show up outside, and the container does not see mounts from outside.
+        This is what makes a container's filesystem look completely different from the host's
+        — <code>/</code> inside is not the same <code>/</code> as outside.
+      </div>
+    </div>
+
+    <div class="ns-row">
+      <div class="ns-name">NET<small>network stack</small></div>
+      <div>
+        Each container gets its own network stack: its own network interfaces, its own IP
+        addresses, its own routing table, its own iptables rules, its own port numbers. When
+        a container listens on port 80, it is port 80 in <em>its</em> network namespace, not on
+        the host. That is why two containers can both listen on port 80 with no conflict.
+      </div>
+    </div>
+
+    <div class="ns-row">
+      <div class="ns-name">UTS<small>hostname</small></div>
+      <div>
+        UTS stands for "Unix Timesharing System" (historical name). This namespace gives the
+        container its own hostname and domain name. That is why
+        <code>docker run --hostname webserver ubuntu hostname</code> prints
+        <code>webserver</code> regardless of what your host machine is called.
+      </div>
+    </div>
+
+    <div class="ns-row">
+      <div class="ns-name">IPC<small>inter-process comm</small></div>
+      <div>
+        Isolates SysV IPC, POSIX message queues, and shared memory segments. A container
+        cannot see or interfere with the shared memory of other containers or the host. Two
+        containers can both create a shared memory segment with the same key, and they will
+        be different segments.
+      </div>
+    </div>
+
+    <div class="ns-row">
+      <div class="ns-name">USER<small>UIDs and GIDs</small></div>
+      <div>
+        Maps user and group IDs between the container and the host. A process can be root
+        (UID 0) inside the container but be mapped to a non-privileged user (UID 100000) on
+        the host. This is a major security feature, though Docker does not enable it by
+        default for compatibility reasons.
+      </div>
+    </div>
+
+    <div class="ns-row">
+      <div class="ns-name">CGROUP<small>cgroup view</small></div>
+      <div>
+        Makes the cgroup hierarchy inside the container start at a different root than the
+        host's. Without this, a container could see exactly which cgroup it was placed in.
+        With it, the container thinks its cgroup is the top of the tree.
+      </div>
+    </div>
+
+    <h3>You can see them yourself</h3>
+    <p>Every namespace shows up in <code>/proc/[pid]/ns/</code> as a symlink:</p>
+
+    <pre data-label="terminal"><code><span class="tok-cmt"># Pick a running container's host PID, then:</span>
+$ ls -l /proc/14523/ns/
+lrwxrwxrwx 1 root root 0 ipc    -> 'ipc:[4026532543]'
+lrwxrwxrwx 1 root root 0 mnt    -> 'mnt:[4026532541]'
+lrwxrwxrwx 1 root root 0 net    -> 'net:[4026532545]'
+lrwxrwxrwx 1 root root 0 pid    -> 'pid:[4026532544]'
+lrwxrwxrwx 1 root root 0 uts    -> 'uts:[4026532542]'
+lrwxrwxrwx 1 root root 0 user   -> 'user:[4026531837]'
+lrwxrwxrwx 1 root root 0 cgroup -> 'cgroup:[4026532546]'
+
+<span class="tok-cmt"># Numbers in brackets are namespace IDs. Compare with your own shell:</span>
+$ ls -l /proc/$$/ns/
+<span class="tok-cmt"># Different numbers for ipc/mnt/net/pid/uts/cgroup -</span>
+<span class="tok-cmt"># same for user (because the container shares user ns with host by default).</span></code></pre>
+
+    <div class="mental-model">
+      <p>
+        Think of namespaces like <strong>seven different pairs of glasses the kernel
+        hands to a process</strong>. The PID glasses make the process see a different list of
+        processes. The network glasses make it see different network interfaces. The mount
+        glasses make it see a different filesystem. The process keeps doing what processes
+        do; the kernel just keeps lying about what it sees.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============== 05 ============== -->
+  <section id="s5">
+    <div class="sec-head">
+      <span class="sec-num">Section 05</span>
+      <h2>cgroups — the resource limits</h2>
+    </div>
+
+    <p>
+      Namespaces handle <em>visibility</em>. <strong>Control Groups (cgroups)</strong> handle
+      <em>resources</em>. They are the kernel feature that enforces limits like "this set of
+      processes can use at most 512 MB of RAM" or "this set of processes gets 0.5 CPU cores."
+    </p>
+
+    <p>cgroups are exposed as a special filesystem, usually mounted at <code>/sys/fs/cgroup</code>:</p>
+
+    <pre data-label="terminal"><code>$ ls /sys/fs/cgroup/
+cgroup.controllers   memory.max       cpu.max
+cgroup.procs         memory.current   cpu.stat
+docker/              io.max           ...</code></pre>
+
+    <p>
+      Each subdirectory is a cgroup. A process becomes part of a cgroup by writing its PID
+      into the cgroup's <code>cgroup.procs</code> file. After that, the kernel enforces all the
+      limits set on that cgroup against the process.
+    </p>
+
+    <h3>Try it without Docker</h3>
+    <p>This is pure Linux. You do not need Docker installed.</p>
+
+    <pre data-label="terminal — needs root"><code><span class="tok-cmt"># Create a new cgroup called "demo"</span>
+$ sudo mkdir /sys/fs/cgroup/demo
+
+<span class="tok-cmt"># Set memory limit to 50 MB</span>
+$ echo <span class="tok-num">50000000</span> | sudo tee /sys/fs/cgroup/demo/memory.max
+
+<span class="tok-cmt"># Move the current shell into this cgroup</span>
+$ echo $$ | sudo tee /sys/fs/cgroup/demo/cgroup.procs
+
+<span class="tok-cmt"># Any program you run from this shell now has 50 MB max.</span>
+<span class="tok-cmt"># Try to allocate 100 MB and watch the OOM killer fire.</span>
+$ python3 -c <span class="tok-str">"a = bytearray(100_000_000); print('ok')"</span>
+Killed</code></pre>
+
+    <p>What Docker controls via cgroups, in the flags you have probably seen:</p>
+
+    <table>
+      <thead>
+        <tr><th>Docker flag</th><th>cgroup setting</th><th>What it does</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>--memory 512m</code></td><td><code>memory.max</code></td><td>Hard cap on RAM. Exceed it and the kernel kills the process.</td></tr>
+        <tr><td><code>--cpus 0.5</code></td><td><code>cpu.max</code></td><td>The process gets half a CPU core's worth of time per period.</td></tr>
+        <tr><td><code>--pids-limit 100</code></td><td><code>pids.max</code></td><td>Maximum number of processes in the container.</td></tr>
+        <tr><td><code>--device-read-bps</code></td><td><code>io.max</code></td><td>I/O bandwidth limit on a block device.</td></tr>
+      </tbody>
+    </table>
+
+    <div class="mental-model">
+      <p>
+        If namespaces are the glasses the kernel hands to a process, <strong>cgroups are the
+        electricity meter wired to the building</strong>. The meter does not care what the
+        tenant sees or does — it only enforces "you cannot draw more than X watts." Cross
+        the limit and the breaker trips.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============== 06 ============== -->
+  <section id="s6">
+    <div class="sec-head">
+      <span class="sec-num">Section 06</span>
+      <h2>Union filesystems and image layers</h2>
+    </div>
+
+    <p>
+      A container needs a filesystem to run in. It needs a <code>/usr</code>, a
+      <code>/bin</code>, a <code>/etc</code> — everything a Linux program expects. Where does
+      that come from?
+    </p>
+
+    <p>
+      The naive answer: have a tar file of an Ubuntu filesystem, extract it to a folder, run
+      the container in there. That works, but it is wasteful — if you run ten Ubuntu
+      containers, you copy the Ubuntu filesystem ten times. And if you modify a file inside
+      one container, you do not want it to affect the others.
+    </p>
+
+    <p>
+      Docker's answer is the <strong>union filesystem</strong>, specifically a driver called
+      <strong>OverlayFS</strong>. It lets you stack several directories on top of each other
+      and view them as a single merged directory, where:
+    </p>
+
+    <ul>
+      <li>Lower directories are <strong>read-only</strong>.</li>
+      <li>The top directory is <strong>writable</strong>.</li>
+      <li>Reads go down the stack until a file is found.</li>
+      <li>Writes always happen in the top layer (this is called <strong>copy-on-write</strong>).</li>
+    </ul>
+
+    <h3>The stack for a typical container</h3>
+
+    <div class="diagram">
+   ┌─────────────────────────────────────────┐
+   │  Container layer  (writable)            │  ← changes the running container makes
+   ├─────────────────────────────────────────┤
+   │  Layer 4: COPY app.py /app/             │  ← from Dockerfile
+   ├─────────────────────────────────────────┤
+   │  Layer 3: RUN pip install -r req.txt    │
+   ├─────────────────────────────────────────┤
+   │  Layer 2: RUN apt-get install -y curl   │
+   ├─────────────────────────────────────────┤
+   │  Layer 1: FROM ubuntu:22.04             │  ← the base image
+   └─────────────────────────────────────────┘
+              (all layers below are read-only)</div>
+
+    <p>
+      When the container reads <code>/usr/bin/python3</code>, OverlayFS checks the top layer
+      first, then layer 4, then layer 3, and so on, until it finds the file. When the
+      container writes to <code>/tmp/log.txt</code>, that write happens only in the top
+      writable layer — none of the lower image layers are touched.
+    </p>
+
+    <h3>Why this design is brilliant</h3>
+    <ul>
+      <li><strong>Sharing.</strong> Ten containers running the same image share the same
+        read-only base layers on disk. Only their tiny writable layers differ. Run 100 nginx
+        containers, and you still have one copy of nginx on disk.</li>
+      <li><strong>Caching builds.</strong> If a Dockerfile instruction has not changed and
+        its inputs have not changed, Docker reuses the cached layer. Rebuilding becomes
+        fast.</li>
+      <li><strong>Immutability.</strong> Image layers never change once created. They have a
+        SHA256 hash; pulling the same image twice gives you the exact same bytes.</li>
+      <li><strong>Distribution.</strong> You only have to download layers you do not already
+        have. Pulling a 1 GB image that shares 800 MB of layers with one you already have
+        only downloads the 200 MB that is new.</li>
+    </ul>
+
+    <h3>See it on disk</h3>
+    <pre data-label="terminal"><code>$ ls /var/lib/docker/overlay2/
+4ba8b53d8c...   <span class="tok-cmt"># one directory per layer</span>
+6a2e7e5f12...
+b8c9f0a3e1...
+c5d6e7f819...
+
+$ ls /var/lib/docker/overlay2/c5d6e7f819.../
+diff       <span class="tok-cmt"># the actual file changes in this layer</span>
+link       <span class="tok-cmt"># short name used in the mount</span>
+lower      <span class="tok-cmt"># list of layers below this one</span>
+work       <span class="tok-cmt"># overlay's scratch space</span></code></pre>
+
+    <div class="mental-model">
+      <p>
+        Image layers are <strong>transparent acetate sheets stacked on an overhead projector</strong>.
+        The base layer is the world map. The next layer adds country borders. The next layer
+        adds city names. Looking through the stack, you see the merged picture. To change a
+        city name, you slide a fresh transparent sheet on top and draw the change there — the
+        map below stays untouched. Anyone using the same base sheets gets to share them.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============== 07 ============== -->
+  <section id="s7">
+    <div class="sec-head">
+      <span class="sec-num">Section 07</span>
+      <h2>What a Docker image actually is</h2>
+    </div>
+
+    <p>
+      A Docker image is not a magic binary blob. It is a small bundle of JSON and tar files
+      that follows the <strong>OCI Image Specification</strong> (Open Container Initiative).
+      Once you know its three parts, the rest is just plumbing.
+    </p>
+
+    <h3>The three parts of an image</h3>
+    <ol>
+      <li>
+        <strong>Layer blobs.</strong> Each layer is a <code>.tar.gz</code> file containing
+        the files added or changed by that layer. Identified by the SHA256 hash of its
+        contents.
+      </li>
+      <li>
+        <strong>Image config.</strong> A JSON file with metadata: which command to run by
+        default (<code>CMD</code>), environment variables, exposed ports, working directory,
+        the order of layers, the user to run as.
+      </li>
+      <li>
+        <strong>Image manifest.</strong> A JSON file listing the config and all the layers
+        that make up this image, by their hashes.
+      </li>
+    </ol>
+
+    <h3>Inspect a real image</h3>
+    <pre data-label="terminal"><code>$ docker pull alpine:3.19
+$ docker inspect alpine:3.19 | head -40
+
+[
+  {
+    <span class="tok-str">"Id"</span>: <span class="tok-str">"sha256:f8c20f8bbcb6..."</span>,
+    <span class="tok-str">"RepoTags"</span>: [<span class="tok-str">"alpine:3.19"</span>],
+    <span class="tok-str">"Created"</span>: <span class="tok-str">"2026-01-15T..."</span>,
+    <span class="tok-str">"Config"</span>: {
+      <span class="tok-str">"Env"</span>: [<span class="tok-str">"PATH=/usr/local/sbin:/usr/local/bin:..."</span>],
+      <span class="tok-str">"Cmd"</span>: [<span class="tok-str">"/bin/sh"</span>],
+      <span class="tok-str">"WorkingDir"</span>: <span class="tok-str">""</span>
+    },
+    <span class="tok-str">"RootFS"</span>: {
+      <span class="tok-str">"Type"</span>: <span class="tok-str">"layers"</span>,
+      <span class="tok-str">"Layers"</span>: [<span class="tok-str">"sha256:5af4f8f59b76..."</span>]
+    }
+  }
+]</code></pre>
+
+    <p>
+      That is the whole truth. An image is config + manifest + a list of layer tarballs.
+      The Docker daemon's job is to pull these from a registry, extract them in the right
+      order onto disk, and then use OverlayFS to stack them when you run the container.
+    </p>
+
+    <h3>Registries</h3>
+    <p>
+      A <strong>registry</strong> is a server that stores and serves images. Docker Hub
+      (<code>hub.docker.com</code>) is the public default. Companies run private ones (AWS
+      ECR, GCP Artifact Registry, Azure ACR, Harbor, GitLab Container Registry). The protocol
+      is HTTP-based, standardized in the OCI Distribution Specification.
+    </p>
+
+    <p>When you run <code>docker pull nginx:1.25</code>, here is what happens:</p>
+    <ol>
+      <li>Docker contacts Docker Hub: "give me the manifest for <code>nginx:1.25</code>."</li>
+      <li>Manifest comes back, listing the config blob hash and each layer blob hash.</li>
+      <li>Docker checks locally for any of those hashes. If already present, skip.</li>
+      <li>For each missing hash, download the blob and verify its SHA256.</li>
+      <li>Store on disk in <code>/var/lib/docker/overlay2/</code>.</li>
+    </ol>
+
+    <div class="key">
+      <p>
+        An image name like <code>nginx:1.25</code> is just a <strong>label pointing to a
+        manifest</strong>. The manifest references layer hashes. The hashes never change.
+        Tags can move (someone can push a new image with the same tag), which is why
+        production deployments often pin to a specific digest like
+        <code>nginx@sha256:abc123...</code> instead of a tag.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============== 08 ============== -->
+  <section id="s8">
+    <div class="sec-head">
+      <span class="sec-num">Section 08</span>
+      <h2>Docker's architecture</h2>
+    </div>
+
+    <p>
+      When you type <code>docker run</code>, you are talking to a CLI. The CLI does not run
+      the container. It sends an HTTP request to a long-running process called the daemon.
+      The daemon does not run the container either — it asks a lower-level component.
+      That component asks an even lower-level one. Eventually the actual <code>execve()</code>
+      happens.
+    </p>
+
+    <p>This separation is deliberate. It happened so that:</p>
+    <ul>
+      <li>The actual container runtime can be small, audited, and standardized (security).</li>
+      <li>Kubernetes and other orchestrators can use the lower layers directly, skipping Docker.</li>
+      <li>Different runtimes can be plugged in (runc, crun, kata-containers, gVisor).</li>
+    </ul>
+
+    <h3>The layers, top to bottom</h3>
+    <div class="diagram">
+   ┌─────────────────────────────────────────────┐
+   │  docker  (CLI)                              │  ← what you type
+   └────────────────────┬────────────────────────┘
+                        │ HTTP API over Unix socket
+                        ▼
+   ┌─────────────────────────────────────────────┐
+   │  dockerd  (Docker daemon)                   │  ← high-level orchestration:
+   │                                             │     images, networks, volumes,
+   │                                             │     build, API server
+   └────────────────────┬────────────────────────┘
+                        │ gRPC
+                        ▼
+   ┌─────────────────────────────────────────────┐
+   │  containerd  (container manager)            │  ← image storage, snapshots,
+   │                                             │     container lifecycle
+   └────────────────────┬────────────────────────┘
+                        │ shim process per container
+                        ▼
+   ┌─────────────────────────────────────────────┐
+   │  runc  (OCI runtime)                        │  ← actually creates the
+   │                                             │     namespaces and cgroups,
+   │                                             │     then execs your process
+   └────────────────────┬────────────────────────┘
+                        ▼
+   ┌─────────────────────────────────────────────┐
+   │  Your container process (PID 1 inside)      │
+   └─────────────────────────────────────────────┘</div>
+
+    <h3>Each piece in plain English</h3>
+    <table>
+      <thead>
+        <tr><th>Component</th><th>What it does</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>docker</code> CLI</td>
+          <td>The command-line tool you use. Translates <code>docker run nginx</code> into an HTTP request to the daemon. Talks to the daemon over a Unix socket, usually <code>/var/run/docker.sock</code>.</td>
+        </tr>
+        <tr>
+          <td><code>dockerd</code></td>
+          <td>The Docker daemon. Long-running background process. Handles the REST API, manages networks, volumes, image builds, and forwards container lifecycle requests to containerd.</td>
+        </tr>
+        <tr>
+          <td><code>containerd</code></td>
+          <td>A container lifecycle manager. Pulls images, manages their on-disk layout via the snapshotter (OverlayFS), and asks runc to actually start them. Can be used independently of Docker (Kubernetes uses it directly).</td>
+        </tr>
+        <tr>
+          <td><code>runc</code></td>
+          <td>The lowest-level runtime. A small Go binary that takes an OCI runtime spec (a JSON file describing what the container should look like) and creates the namespaces, sets up cgroups, then <code>execve()</code>s your command.</td>
+        </tr>
+        <tr>
+          <td><code>shim</code></td>
+          <td>A tiny process that stays alive as the parent of your container's PID 1. Lets containerd be restarted without killing your containers. There is one shim per container.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="key">
+      <p>
+        <strong>The Docker daemon does not need to be running for your containers to keep
+        running.</strong> Once runc has set up the namespaces and execed your process, the
+        process is a normal Linux process owned by its shim. You can restart dockerd and
+        containerd, and your containers keep humming along.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============== 09 ============== -->
+  <section id="s9">
+    <div class="sec-head">
+      <span class="sec-num">Section 09</span>
+      <h2>What happens when you run <code>docker run</code></h2>
+    </div>
+
+    <p>
+      Let us trace <code>docker run -d --name web -p 8080:80 nginx</code> from your keystroke
+      to a running web server. Every step is something Docker actually does.
+    </p>
+
+    <div class="step">
+      <span class="step-n">01</span>
+      <h4>The CLI parses your command</h4>
+      <p>
+        <code>docker</code> reads its arguments, builds a JSON payload describing what you
+        want, and POSTs it to <code>http://unix.sock/containers/create</code> on the Docker
+        daemon's Unix socket.
+      </p>
+    </div>
+
+    <div class="step">
+      <span class="step-n">02</span>
+      <h4>The daemon checks if the image exists locally</h4>
+      <p>
+        It looks for <code>nginx:latest</code> in <code>/var/lib/docker/image/</code>. If not
+        present, it pulls from the registry — fetches manifest, downloads missing layers,
+        verifies SHA256 hashes, stores in <code>/var/lib/docker/overlay2/</code>.
+      </p>
+    </div>
+
+    <div class="step">
+      <span class="step-n">03</span>
+      <h4>The daemon prepares the filesystem</h4>
+      <p>
+        It asks containerd's snapshotter to create a new writable layer on top of the
+        nginx image's read-only layers. The result is a fresh OverlayFS mount point that
+        will become the container's <code>/</code>.
+      </p>
+    </div>
+
+    <div class="step">
+      <span class="step-n">04</span>
+      <h4>The daemon sets up networking</h4>
+      <p>
+        Creates a virtual ethernet pair (<code>veth</code>) — one end goes into the new
+        network namespace (will be <code>eth0</code> inside the container), the other end
+        attaches to the <code>docker0</code> bridge on the host. Assigns the container a
+        private IP like <code>172.17.0.2</code>. Adds an iptables DNAT rule so that traffic
+        to host port 8080 gets forwarded to <code>172.17.0.2:80</code>.
+      </p>
+    </div>
+
+    <div class="step">
+      <span class="step-n">05</span>
+      <h4>The daemon builds the OCI runtime spec</h4>
+      <p>
+        A JSON file with everything runc needs: the path to the prepared rootfs, the
+        command to run (<code>nginx -g 'daemon off;'</code>), environment variables, namespaces
+        to create, cgroup limits, capabilities to drop, seccomp filter, the user to run as.
+      </p>
+    </div>
+
+    <div class="step">
+      <span class="step-n">06</span>
+      <h4>containerd spawns a shim and asks runc to start the container</h4>
+      <p>
+        runc reads the spec, calls <code>clone()</code> with the right namespace flags, sets
+        up cgroups, chroots into the rootfs, drops capabilities, then <code>execve()</code>s
+        the nginx binary. From this moment on, nginx is a normal Linux process — but it
+        thinks it is alone in the world.
+      </p>
+    </div>
+
+    <div class="step">
+      <span class="step-n">07</span>
+      <h4>The daemon returns the container ID to the CLI</h4>
+      <p>
+        The CLI prints it and exits (because of <code>-d</code> for detached). The container
+        keeps running, parented by its shim. The CLI exiting has zero impact on the running
+        nginx — the daemon could exit too, and nginx would keep serving requests.
+      </p>
+    </div>
+
+    <p>Everything you have seen with <code>docker run</code> is just orchestration of
+    things the Linux kernel already knew how to do.</p>
+  </section>
+
+  <!-- ============== 10 ============== -->
+  <section id="s10">
+    <div class="sec-head">
+      <span class="sec-num">Section 10</span>
+      <h2>Container networking, step by step</h2>
+    </div>
+
+    <p>
+      Container networking trips up almost every beginner. The mechanics are not hard,
+      but you have to look at the pieces individually.
+    </p>
+
+    <h3>The default bridge network</h3>
+    <p>
+      When Docker starts, it creates a Linux bridge interface called <code>docker0</code>
+      on your host. A bridge is a virtual switch — anything connected to it can talk to
+      anything else connected to it.
+    </p>
+
+    <pre data-label="terminal"><code>$ ip addr show docker0
+3: docker0: &lt;BROADCAST,MULTICAST,UP&gt; mtu 1500
+    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0</code></pre>
+
+    <p>
+      <code>docker0</code> has the IP <code>172.17.0.1</code>. Every container on the default
+      bridge gets an IP in the <code>172.17.0.0/16</code> range and uses <code>docker0</code>
+      as its gateway.
+    </p>
+
+    <h3>veth pairs — the cable</h3>
+    <p>
+      For each container, Docker creates a <strong>veth pair</strong>: two virtual network
+      interfaces tied together so that anything sent into one comes out of the other. One
+      end goes into the container's network namespace (and is renamed <code>eth0</code> inside).
+      The other end stays in the host's network namespace and is attached to the
+      <code>docker0</code> bridge.
+    </p>
+
+    <div class="diagram">
+   Host network namespace                   Container network namespace
+   ┌─────────────────────────┐              ┌─────────────────────────┐
+   │                         │              │                         │
+   │  docker0 (bridge)       │              │  eth0  172.17.0.2       │
+   │     │                   │              │     │                   │
+   │     │ attached to       │              │                         │
+   │     ▼                   │              │                         │
+   │  vethXXX ─────────────────────────────── (other end of pair)     │
+   │                         │              │                         │
+   │  eth0  (your real NIC)  │              │  lo                     │
+   │                         │              │                         │
+   └─────────────────────────┘              └─────────────────────────┘
+            │
+            ▼
+        Internet</div>
+
+    <h3>How a packet leaves a container</h3>
+    <ol>
+      <li>Container code calls <code>connect()</code> to, say, <code>1.1.1.1:443</code>.</li>
+      <li>Packet leaves container's <code>eth0</code> → arrives at the host's veth end → arrives at <code>docker0</code>.</li>
+      <li>Host kernel's routing decides this packet is for the public internet → it goes out the host's real NIC.</li>
+      <li>Before leaving, an <strong>iptables</strong> MASQUERADE rule rewrites the source IP from <code>172.17.0.2</code> to the host's public IP (so the response can come back).</li>
+      <li>Response returns to host → kernel rewrites the destination back to <code>172.17.0.2</code> → travels through <code>docker0</code> → through veth pair → into container's <code>eth0</code>.</li>
+    </ol>
+
+    <h3>Port publishing — the <code>-p</code> flag</h3>
+    <p>
+      <code>docker run -p 8080:80 nginx</code> means "make host port 8080 forward to container
+      port 80." How? By adding a DNAT iptables rule:
+    </p>
+
+    <pre data-label="iptables (-p 8080:80)"><code>$ sudo iptables -t nat -L DOCKER
+
+DNAT  tcp  -- 0.0.0.0/0   0.0.0.0/0   tcp dpt:8080 to:172.17.0.2:80</code></pre>
+
+    <p>
+      When traffic arrives on the host's port 8080, the kernel rewrites the destination to
+      <code>172.17.0.2:80</code> before forwarding. The container has no idea this happened
+      — it just sees a connection arriving on its port 80.
+    </p>
+
+    <div class="gotcha">
+      <p>
+        <strong>Two containers cannot publish the same host port.</strong> If you already
+        have something on host port 8080, the second <code>-p 8080:80</code> will fail. The
+        container ports themselves do not conflict — both can listen on port 80 internally.
+        The conflict is over the host's port 8080.
+      </p>
+    </div>
+
+    <h3>User-defined bridges</h3>
+    <p>
+      When you do <code>docker network create mynet</code> and run containers on it, Docker
+      creates a fresh bridge with a fresh subnet and — importantly — sets up DNS so that
+      containers can reach each other by <em>name</em>. On the default <code>docker0</code>
+      bridge, you can only reach other containers by IP. On user-defined networks,
+      <code>http://api</code> resolves to the container named <code>api</code>.
+    </p>
+  </section>
+
+  <!-- ============== 11 ============== -->
+  <section id="s11">
+    <div class="sec-head">
+      <span class="sec-num">Section 11</span>
+      <h2>Storage — volumes and bind mounts</h2>
+    </div>
+
+    <p>
+      Container filesystems are ephemeral. When a container is removed, its writable layer
+      is gone, and any data the app wrote is gone with it. For databases, uploaded files,
+      logs you want to keep — you need data that outlives the container.
+    </p>
+
+    <div class="grid-3">
+      <div class="card">
+        <span class="tag">Volumes</span>
+        <h4>Managed by Docker</h4>
+        <p>
+          Docker creates and manages a directory under
+          <code>/var/lib/docker/volumes/</code> and mounts it into the container. Best choice
+          for production data — Docker handles backups, drivers, lifecycle.
+        </p>
+        <pre style="font-size:11px;padding:12px;"><code>docker run -v mydata:/data nginx</code></pre>
+      </div>
+      <div class="card">
+        <span class="tag">Bind mounts</span>
+        <h4>A host path mounted in</h4>
+        <p>
+          You point a specific host directory into the container. Useful for local dev (mount
+          your source code so changes show up immediately) and config files. Less portable.
+        </p>
+        <pre style="font-size:11px;padding:12px;"><code>docker run -v /home/me/app:/app node</code></pre>
+      </div>
+      <div class="card">
+        <span class="tag">tmpfs</span>
+        <h4>RAM-only</h4>
+        <p>
+          A mount backed by RAM, gone when the container stops. For secrets that should never
+          touch disk, or for scratch space where the workload writes constantly and you want
+          to avoid disk I/O.
+        </p>
+        <pre style="font-size:11px;padding:12px;"><code>docker run --tmpfs /tmp redis</code></pre>
+      </div>
+    </div>
+
+    <div class="key">
+      <p>
+        <strong>Volumes bypass the union filesystem entirely.</strong> Reads and writes to a
+        mounted volume go straight to the host filesystem, with no copy-on-write overhead. That
+        is why databases (which do a lot of small writes) should always use volumes, never the
+        writable layer.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============== 12 ============== -->
+  <section id="s12">
+    <div class="sec-head">
+      <span class="sec-num">Section 12</span>
+      <h2>Dockerfile — how layers are built</h2>
+    </div>
+
+    <p>
+      A <strong>Dockerfile</strong> is a recipe for building an image. Each instruction
+      typically produces one layer. Here is a Dockerfile for a Python app:
+    </p>
+
+    <pre data-label="Dockerfile"><code><span class="tok-key">FROM</span> python:<span class="tok-num">3.11</span>-slim                    <span class="tok-cmt"># base layer</span>
+
+<span class="tok-key">WORKDIR</span> /app                              <span class="tok-cmt"># metadata, no real layer</span>
+
+<span class="tok-key">COPY</span> requirements.txt .                   <span class="tok-cmt"># layer: just the requirements file</span>
+<span class="tok-key">RUN</span> pip install --no-cache-dir -r requirements.txt   <span class="tok-cmt"># layer: installed deps</span>
+
+<span class="tok-key">COPY</span> . .                                 <span class="tok-cmt"># layer: rest of app code</span>
+
+<span class="tok-key">EXPOSE</span> <span class="tok-num">8000</span>                              <span class="tok-cmt"># metadata only</span>
+<span class="tok-key">CMD</span> [<span class="tok-str">"python"</span>, <span class="tok-str">"-m"</span>, <span class="tok-str">"uvicorn"</span>, <span class="tok-str">"main:app"</span>, <span class="tok-str">"--host"</span>, <span class="tok-str">"0.0.0.0"</span>]</code></pre>
+
+    <h3>What <code>docker build</code> does</h3>
+    <ol>
+      <li>Reads the Dockerfile.</li>
+      <li>For each instruction, starts a temporary container based on the current image state.</li>
+      <li>Runs the instruction inside that container.</li>
+      <li>Commits the filesystem changes as a new layer with its own SHA256 hash.</li>
+      <li>Moves on to the next instruction, using the new layer as the base.</li>
+    </ol>
+
+    <h3>The cache rule that changes everything</h3>
+    <p>
+      Docker caches layers. If an instruction's text has not changed and its input files have
+      not changed, Docker reuses the cached layer instead of re-running the instruction. The
+      cache invalidates the moment an instruction or its inputs change — and once a layer is
+      invalidated, every layer below it is invalidated too.
+    </p>
+
+    <p>That is why the dockerfile above puts <code>COPY requirements.txt</code> <em>before</em>
+    <code>COPY . .</code>:</p>
+
+    <ul>
+      <li>You change <code>main.py</code> — only the last <code>COPY . .</code> layer rebuilds.
+        The big <code>pip install</code> layer is cached.</li>
+      <li>If you had done <code>COPY . .</code> first, every code change would invalidate the
+        pip install layer too, and every rebuild would re-download every dependency. Slow.</li>
+    </ul>
+
+    <div class="gotcha">
+      <p>
+        <strong>Each <code>RUN</code> creates a layer, and that layer is permanent.</strong>
+        If you do <code>RUN wget bigfile.tar.gz</code> on one line and <code>RUN rm
+        bigfile.tar.gz</code> on the next, the file is still in the image — the first layer
+        has it, the second layer just marks it deleted. Combine into a single
+        <code>RUN wget ... &amp;&amp; rm ...</code> to keep the image small.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============== 13 ============== -->
+  <section id="s13">
+    <div class="sec-head">
+      <span class="sec-num">Section 13</span>
+      <h2>Build your own Docker in Python</h2>
+    </div>
+
+    <p>
+      Time to put it all together. We will build a minimal container runtime in pure Python
+      that creates real namespaces, sets up a real cgroup, chroots into a real filesystem,
+      and runs a command — like a very simple <code>docker run</code>. The whole thing fits
+      in roughly 150 lines.
+    </p>
+
+    <p>What we will build:</p>
+    <ul>
+      <li>A CLI that takes a root filesystem tarball and a command.</li>
+      <li>It will <code>fork()</code> a child process.</li>
+      <li>The child enters fresh PID, mount, UTS, IPC, and network namespaces.</li>
+      <li>It places itself in a new cgroup with a 100 MB memory limit.</li>
+      <li>It chroots into the rootfs, mounts <code>/proc</code>, and execs the command.</li>
+    </ul>
+
+    <h3>Prerequisites</h3>
+    <ul>
+      <li>A Linux machine (will not work on macOS or Windows directly — use a Linux VM).</li>
+      <li>Python 3.8+.</li>
+      <li>Root privileges (creating namespaces and cgroups requires it).</li>
+      <li>A root filesystem to use. Easy way: grab Alpine's tarball.</li>
+    </ul>
+
+    <pre data-label="setup — once"><code><span class="tok-cmt"># Get a minimal Linux root filesystem (Alpine, ~5 MB)</span>
+$ mkdir -p alpine-rootfs
+$ wget https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-minirootfs-3.19.1-x86_64.tar.gz
+$ sudo tar -xzf alpine-minirootfs-3.19.1-x86_64.tar.gz -C alpine-rootfs/
+
+<span class="tok-cmt"># Quick check</span>
+$ ls alpine-rootfs/
+bin   etc   lib   media   opt   root   sbin   sys   tmp   usr   var
+<span class="tok-cmt"># That is a real Linux filesystem - 5 MB and it has everything sh needs</span></code></pre>
+
+    <h3>Step 1 — Wrap the unshare syscall</h3>
+    <p>
+      Python's <code>os</code> module does not expose <code>unshare()</code> directly. We call
+      it through <code>ctypes</code>.
+    </p>
+
+    <pre data-label="mydocker.py — namespaces"><code><span class="tok-key">import</span> ctypes
+<span class="tok-key">import</span> os
+<span class="tok-key">import</span> sys
+
+<span class="tok-cmt"># Namespace flags from /usr/include/linux/sched.h</span>
+CLONE_NEWNS    = <span class="tok-num">0x00020000</span>   <span class="tok-cmt"># mount namespace</span>
+CLONE_NEWUTS   = <span class="tok-num">0x04000000</span>   <span class="tok-cmt"># UTS / hostname</span>
+CLONE_NEWIPC   = <span class="tok-num">0x08000000</span>   <span class="tok-cmt"># IPC</span>
+CLONE_NEWPID   = <span class="tok-num">0x20000000</span>   <span class="tok-cmt"># PID</span>
+CLONE_NEWNET   = <span class="tok-num">0x40000000</span>   <span class="tok-cmt"># network</span>
+
+libc = ctypes.CDLL(<span class="tok-str">"libc.so.6"</span>, use_errno=<span class="tok-key">True</span>)
+
+<span class="tok-key">def</span> <span class="tok-fn">unshare</span>(flags):
+    <span class="tok-str">"""Detach the current process into new namespaces."""</span>
+    <span class="tok-key">if</span> libc.unshare(flags) != <span class="tok-num">0</span>:
+        err = ctypes.get_errno()
+        <span class="tok-key">raise</span> OSError(err, os.strerror(err))</code></pre>
+
+    <h3>Step 2 — Set up a cgroup for memory limits</h3>
+
+    <pre data-label="mydocker.py — cgroups"><code><span class="tok-key">def</span> <span class="tok-fn">setup_cgroup</span>(name, memory_limit_bytes):
+    <span class="tok-str">"""Create a cgroup, set a memory limit, put the current process in it."""</span>
+    cgroup_root = <span class="tok-str">"/sys/fs/cgroup"</span>
+    cg_path = os.path.join(cgroup_root, name)
+    os.makedirs(cg_path, exist_ok=<span class="tok-key">True</span>)
+
+    <span class="tok-cmt"># Set memory limit (cgroup v2 syntax)</span>
+    <span class="tok-key">with</span> open(os.path.join(cg_path, <span class="tok-str">"memory.max"</span>), <span class="tok-str">"w"</span>) <span class="tok-key">as</span> f:
+        f.write(str(memory_limit_bytes))
+
+    <span class="tok-cmt"># Add the current process to the cgroup</span>
+    <span class="tok-key">with</span> open(os.path.join(cg_path, <span class="tok-str">"cgroup.procs"</span>), <span class="tok-str">"w"</span>) <span class="tok-key">as</span> f:
+        f.write(str(os.getpid()))
+
+    print(<span class="tok-str">f"[+] cgroup {name} created, memory limit {memory_limit_bytes} bytes"</span>)</code></pre>
+
+    <h3>Step 3 — The container function (runs in the child)</h3>
+
+    <pre data-label="mydocker.py — container body"><code><span class="tok-key">import</span> subprocess
+
+<span class="tok-key">def</span> <span class="tok-fn">run_container</span>(rootfs, command, hostname=<span class="tok-str">"container"</span>):
+    <span class="tok-str">"""This runs in the CHILD process after fork."""</span>
+
+    <span class="tok-cmt"># 1. Enter new namespaces</span>
+    flags = (CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWPID |
+             CLONE_NEWIPC | CLONE_NEWNET)
+    unshare(flags)
+    print(<span class="tok-str">"[+] namespaces created"</span>)
+
+    <span class="tok-cmt"># 2. Fork again. The first child becomes PID 1 inside the new PID</span>
+    <span class="tok-cmt">#    namespace only after we fork once more.</span>
+    pid = os.fork()
+    <span class="tok-key">if</span> pid != <span class="tok-num">0</span>:
+        os.waitpid(pid, <span class="tok-num">0</span>)
+        sys.exit(<span class="tok-num">0</span>)
+
+    <span class="tok-cmt"># 3. Set the hostname (visible only in this UTS namespace)</span>
+    libc.sethostname(hostname.encode(), len(hostname))
+
+    <span class="tok-cmt"># 4. Apply cgroup memory limit (100 MB)</span>
+    setup_cgroup(<span class="tok-str">"mydocker"</span>, <span class="tok-num">100</span> * <span class="tok-num">1024</span> * <span class="tok-num">1024</span>)
+
+    <span class="tok-cmt"># 5. Make mount namespace private so our mounts do not leak to host.</span>
+    <span class="tok-cmt">#    Equivalent to:  mount --make-rprivate /</span>
+    subprocess.run(
+        [<span class="tok-str">"mount"</span>, <span class="tok-str">"--make-rprivate"</span>, <span class="tok-str">"/"</span>], check=<span class="tok-key">True</span>
+    )
+
+    <span class="tok-cmt"># 6. chroot into the rootfs</span>
+    os.chroot(rootfs)
+    os.chdir(<span class="tok-str">"/"</span>)
+    print(<span class="tok-str">f"[+] chrooted into {rootfs}"</span>)
+
+    <span class="tok-cmt"># 7. Mount /proc so commands like 'ps' work inside the container</span>
+    os.makedirs(<span class="tok-str">"/proc"</span>, exist_ok=<span class="tok-key">True</span>)
+    subprocess.run([<span class="tok-str">"mount"</span>, <span class="tok-str">"-t"</span>, <span class="tok-str">"proc"</span>, <span class="tok-str">"proc"</span>, <span class="tok-str">"/proc"</span>], check=<span class="tok-key">True</span>)
+    print(<span class="tok-str">"[+] /proc mounted"</span>)
+
+    <span class="tok-cmt"># 8. Execute the user's command - this replaces our Python process</span>
+    print(<span class="tok-str">f"[+] executing: {' '.join(command)}"</span>)
+    os.execvp(command[<span class="tok-num">0</span>], command)</code></pre>
+
+    <h3>Step 4 — Glue it together with a CLI</h3>
+
+    <pre data-label="mydocker.py — entry point"><code><span class="tok-key">def</span> <span class="tok-fn">main</span>():
+    <span class="tok-key">if</span> len(sys.argv) &lt; <span class="tok-num">3</span>:
+        print(<span class="tok-str">"Usage: sudo python3 mydocker.py &lt;rootfs&gt; &lt;cmd&gt; [args...]"</span>)
+        sys.exit(<span class="tok-num">1</span>)
+
+    rootfs  = os.path.abspath(sys.argv[<span class="tok-num">1</span>])
+    command = sys.argv[<span class="tok-num">2</span>:]
+
+    <span class="tok-cmt"># Fork the container. Parent waits for child; child becomes container.</span>
+    pid = os.fork()
+    <span class="tok-key">if</span> pid == <span class="tok-num">0</span>:
+        run_container(rootfs, command)
+    <span class="tok-key">else</span>:
+        os.waitpid(pid, <span class="tok-num">0</span>)
+        print(<span class="tok-str">"[+] container exited"</span>)
+
+<span class="tok-key">if</span> __name__ == <span class="tok-str">"__main__"</span>:
+    main()</code></pre>
+
+    <h3>Step 5 — Run it</h3>
+    <pre data-label="terminal"><code>$ sudo python3 mydocker.py ./alpine-rootfs /bin/sh
+
+[+] namespaces created
+[+] cgroup mydocker created, memory limit 104857600 bytes
+[+] chrooted into /home/you/alpine-rootfs
+[+] /proc mounted
+[+] executing: /bin/sh
+
+/ # hostname
+container
+
+/ # ps -ef
+PID   USER     TIME  COMMAND
+  1   root     0:00  /bin/sh
+  3   root     0:00  ps -ef
+
+/ # ls /
+bin   dev   etc   lib   proc   root   sbin   sys   tmp   usr   var
+
+/ # ip link    # network namespace - only loopback
+1: lo: &lt;LOOPBACK&gt; mtu 65536 qdisc noop state DOWN
+
+/ # exit
+[+] container exited</code></pre>
+
+    <p>
+      That is a real container. Real PID namespace (the shell sees itself as PID 1). Real
+      UTS namespace (hostname is <code>container</code>). Real network namespace (only loopback,
+      because we have not set up a veth pair). Real chroot. Real cgroup memory limit.
+    </p>
+
+    <h3>What our toy is missing</h3>
+    <p>To become real Docker, we would still need to add:</p>
+    <ul>
+      <li><strong>Image management.</strong> Pulling, layer storage, OverlayFS mounts.</li>
+      <li><strong>Networking.</strong> Create veth pairs, attach to a bridge, set up iptables NAT.</li>
+      <li><strong>Capabilities and seccomp.</strong> Drop dangerous capabilities, install a syscall filter.</li>
+      <li><strong>User namespace mapping.</strong> Map container root to a non-root user on the host.</li>
+      <li><strong>A daemon and an API.</strong> Long-running process, REST endpoints, container list.</li>
+      <li><strong>Volumes and bind mounts.</strong> Mount host paths or managed volumes into the container.</li>
+      <li><strong>Image build.</strong> A Dockerfile interpreter that creates layers.</li>
+    </ul>
+
+    <p>
+      But the core idea — fork, unshare namespaces, place into a cgroup, chroot, exec — that
+      is the entire heart of how Docker works. Everything else is engineering polish around it.
+    </p>
+
+    <div class="mental-model">
+      <p>
+        If you have made it this far and run the code, here is the punchline: every time you
+        type <code>docker run</code>, the kernel does <em>exactly what your Python script
+        did</em>. There is no special "container engine" beneath. It is fork, unshare, mount,
+        chroot, execve. The same five syscalls you just used.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============== 14 ============== -->
+  <section id="s14">
+    <div class="sec-head">
+      <span class="sec-num">Section 14</span>
+      <h2>Common misconceptions</h2>
+    </div>
+
+    <div class="myth">
+      <p>
+        <strong>"Docker is a lightweight VM."</strong>
+        It is not. A VM virtualizes hardware and runs its own kernel. A container shares the
+        host's kernel and is just a process with restricted views. Confusing them leads to
+        wrong assumptions about isolation, performance, and security.
+      </p>
+    </div>
+
+    <div class="myth">
+      <p>
+        <strong>"Containers are perfectly isolated."</strong>
+        They are not. They share the kernel. A kernel exploit, or a privileged container, can
+        affect the host. For workloads that need stronger isolation (multi-tenant SaaS, running
+        untrusted code), reach for kata-containers, gVisor, or actual VMs.
+      </p>
+    </div>
+
+    <div class="myth">
+      <p>
+        <strong>"Container and image mean the same thing."</strong>
+        An <em>image</em> is the immutable template (the layers + config). A <em>container</em>
+        is a running instance with a writable layer on top. One image, many containers — the
+        same way one class makes many objects.
+      </p>
+    </div>
+
+    <div class="myth">
+      <p>
+        <strong>"Docker has its own kernel."</strong>
+        On Linux, it does not. Containers use the host's kernel. Docker Desktop on macOS and
+        Windows runs a small Linux VM and uses <em>that</em> VM's kernel — but on Linux itself,
+        there is no extra kernel.
+      </p>
+    </div>
+
+    <div class="myth">
+      <p>
+        <strong>"I need Docker to run containers."</strong>
+        You do not. Containers are a kernel feature. <code>runc</code>, <code>podman</code>,
+        <code>containerd</code>, <code>nerdctl</code>, and even your own Python script (Section
+        13) all run containers. Docker is a popular user experience layered on top of these.
+      </p>
+    </div>
+
+    <div class="myth">
+      <p>
+        <strong>"Storing data in a container is fine, it persists."</strong>
+        It does not. The writable layer dies with the container. For any data you want to
+        keep across container removal, use a volume or a bind mount. Especially for databases.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============== 15 ============== -->
+  <section id="s15">
+    <div class="sec-head">
+      <span class="sec-num">Section 15</span>
+      <h2>Interview cheat sheet</h2>
+    </div>
+
+    <h4>One-line definitions</h4>
+    <table>
+      <thead><tr><th>Term</th><th>Crisp definition</th></tr></thead>
+      <tbody>
+        <tr><td>Container</td><td>A Linux process running in its own set of namespaces and a cgroup, on a chrooted filesystem.</td></tr>
+        <tr><td>Image</td><td>An immutable bundle of layered filesystem tarballs plus a JSON config, identified by a SHA256 digest.</td></tr>
+        <tr><td>Layer</td><td>A read-only set of filesystem changes, stored once on disk, shareable across many images.</td></tr>
+        <tr><td>Namespace</td><td>A kernel feature that gives a process a private view of a system resource (PID, mount, net, uts, ipc, user, cgroup).</td></tr>
+        <tr><td>cgroup</td><td>A kernel feature that enforces resource limits (CPU, memory, IO, PIDs) on a group of processes.</td></tr>
+        <tr><td>OverlayFS</td><td>A union filesystem that stacks read-only lower layers and a writable upper layer into one merged view, with copy-on-write.</td></tr>
+        <tr><td>runc</td><td>The OCI-compliant low-level runtime that actually creates the container by calling clone, unshare, chroot, execve.</td></tr>
+        <tr><td>containerd</td><td>A higher-level container manager handling image storage, snapshots, and lifecycle. Used by Docker and Kubernetes.</td></tr>
+        <tr><td>OCI</td><td>Open Container Initiative — the spec body that defines the container image format, runtime spec, and distribution spec.</td></tr>
+      </tbody>
+    </table>
+
+    <h4>How is a container different from a VM?</h4>
+    <p>
+      A VM virtualizes hardware and runs a full guest OS with its own kernel; a container
+      virtualizes the operating system and shares the host's kernel. Containers are lighter,
+      faster to start, denser, but with weaker isolation than VMs.
+    </p>
+
+    <h4>What Linux features does Docker use?</h4>
+    <p>
+      Namespaces (PID, mount, network, UTS, IPC, user, cgroup) for isolation; cgroups for
+      resource limits; OverlayFS (or another union filesystem) for layered images; capabilities,
+      seccomp, and AppArmor or SELinux for additional security boundaries; iptables for
+      networking.
+    </p>
+
+    <h4>What happens when you run <code>docker run nginx</code>?</h4>
+    <p>
+      The CLI sends a request to the daemon. The daemon pulls the image if missing,
+      creates a new OverlayFS mount for the container's filesystem, sets up a veth pair and
+      iptables rules for networking, writes an OCI runtime spec, and asks containerd. containerd
+      spawns a shim and asks runc. runc creates the namespaces, sets up cgroups, chroots into
+      the rootfs, drops capabilities, and execs the nginx binary.
+    </p>
+
+    <h4>Why are Docker images so small?</h4>
+    <p>
+      Because they share layers. A base layer like <code>ubuntu:22.04</code> is downloaded
+      once and reused across all images that build on it. Only the unique layers per image
+      take additional disk space.
+    </p>
+
+    <h4>Why are some Dockerfiles slow to build?</h4>
+    <p>
+      Layer cache is invalidated when an instruction or its inputs change, and every layer
+      below the invalidated one rebuilds too. Bad layer ordering — putting changing files
+      before stable dependencies — causes most slow builds. Fix: copy stable inputs first
+      (like <code>requirements.txt</code>), run the heavy install, then copy the changing
+      app code.
+    </p>
+
+    <h4>Where does data go after a container is removed?</h4>
+    <p>
+      Anything in the writable layer is gone. Anything in a volume or bind mount survives.
+      For persistent data, always use a volume — never rely on the writable layer.
+    </p>
+
+    <h4>How do two containers talk to each other?</h4>
+    <p>
+      On the default bridge, they reach each other by IP. On a user-defined bridge network,
+      they reach each other by container name through Docker's embedded DNS. To reach a
+      container from outside the host, the container must have a published port via
+      <code>-p</code>, which adds a DNAT iptables rule.
+    </p>
+
+    <h4>What is the OCI?</h4>
+    <p>
+      The Open Container Initiative — an open governance body that standardizes the container
+      image format (Image Spec), the runtime interface (Runtime Spec), and the registry
+      protocol (Distribution Spec). Docker, Podman, containerd, runc, and crun all conform
+      to OCI specs, which is why images built by one tool run on another.
+    </p>
+  </section>
+
+  <!-- ============== FOOTER ============== -->
+  <footer>
+    <p>Notes compiled for systems and DevOps interview prep. The Python container runtime in Section 13 is intentionally small. Run it once and the magic permanently disappears — which is the goal.</p>
+  </footer>
+
+</div>
+</body>
+</html>
